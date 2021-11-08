@@ -405,7 +405,7 @@ class Dbx:
     def dump(self,outName):
         print(self.trueFilename)
         f2=open2(outName,"w")
-        f2.write(self.fileGUID.format()+"\n")
+        f2.write("Partition "+self.fileGUID.format()+"\n")
 
         for (guid,instance) in self.instances:
             if guid==self.primaryInstanceGUID: self.writeInstance(f2,instance,guid.format()+ " #primary instance")
