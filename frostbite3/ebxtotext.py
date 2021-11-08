@@ -7,7 +7,7 @@ import sys
 #Choose where you dumped the files and where to put the resulting TXT files.
 dumpDirectory   = r"D:\hexing\bf4_dump"
 targetDirectory = r"D:\hexing\bf4_ebx"
-inputFolder     = r"gameplay" #relative to ebxFolder
+inputFolder     = r"UI" #relative to ebxFolder
 
 ebxFolder       = r"bundles\ebx" #relative to the dumpDirectory
 

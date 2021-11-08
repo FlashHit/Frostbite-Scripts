@@ -520,7 +520,7 @@ class Dbx:
             else:
                 self.writeInstance(f2,instance,guid.format())
 
-            self.recurse(instance.fields,f2,0)
+            self.recurse(instance.fields,f2,0,instance.desc.name)
 
         f2.close()
 
@@ -565,7 +565,7 @@ class Dbx:
                             desc=copy.deepcopy(member.desc)
                             desc.name="member("+str(index)+")"
                             member.desc=desc
-                    self.recurse(field.value.fields,f2,lvl)
+                    self.recurse(field.value.fields,f2,lvl,field.value.desc.name)
 
             elif typ==FieldType.GUID:
                 if field.value.isNull():
@@ -597,7 +597,7 @@ class Dbx:
                     if field.desc.name=="ActionKey":
                         writeEventName=True
 
-                if field.desc.name=="NameHash" or field.desc.name=="AssetId" or field.desc.name=="ProjectId":
+                if field.desc.name=="NameHash" or field.desc.name=="AssetId" or field.desc.name=="ProjectId" or field.desc.name=="DataKey" or field.desc.name=="InstanceNameHash":
                     writeAssetName = True
 
                 self.writeField(f2,field,lvl," " +str(field.value),writeEventName, writeAssetName)
