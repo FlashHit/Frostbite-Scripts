@@ -468,7 +468,11 @@ class Dbx:
         f2.write(self.fileGUID.format()+"\n")
 
         for (guid,instance) in self.instances:
-            self.writeInstance(f2,instance,guid.format())
+            if self.prim==instance:
+                self.writeInstance(f2,instance,guid.format()+" #primary instance")
+            else:
+                self.writeInstance(f2,instance,guid.format())
+
             self.recurse(instance.fields,f2,0)
 
         f2.close()
