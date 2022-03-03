@@ -4,9 +4,9 @@ import ebx
 import sys
 
 #Choose where you dumped the files and where to put the resulting TXT files.
-dumpDirectory   = r"E:\GameRips\NFS\NFSTR\pc\dump"
-targetDirectory = r"E:\GameRips\NFS\NFSTR\pc\ebx"
-inputFolder     = r"_c4\sound\music" #relative to ebxFolder
+dumpDirectory   = r"D:\hexing\bf3_dump"
+targetDirectory = r"D:\hexing\bf3_ebx_new"
+inputFolder     = r"" #relative to ebxFolder
 
 ebxFolder       = r"bundles\ebx" #relative to the dumpDirectory
 
@@ -33,3 +33,9 @@ else:
             dbx=ebx.Dbx(os.path.join(dir0,fname),ebxFolder)
             outName=os.path.join(targetDirectory,dbx.trueFilename+".txt")
             dbx.dump(outName)
+
+    ebx.writeUniqueTypes()
+    ebx.writeUnknownEvents()
+    ebx.writeUnknownAssets()
+
+    print("Done.")

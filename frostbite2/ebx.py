@@ -9,12 +9,56 @@ import pickle
 from dbo import Guid
 import res
 import dds
+import json
 
 def unpackLE(typ,data): return unpack("<"+typ,data)
 def unpackBE(typ,data): return unpack(">"+typ,data)
 
 guidTable=dict()
 parsedEbx=list()
+uniqueTypes = set([])
+
+unknownEvents = set([])
+eventNames = {}
+
+with open('eventHashes.json') as f:
+    eventNames = json.load(f)
+
+unknownAssets = set([])
+assetNames = {}
+
+with open('assetHashes.json') as f:
+    assetNames = json.load(f)
+
+def writeUniqueTypes():
+    print('Writing unique types')
+    uniqueFile=open('uniqueTypes.txt', 'w')
+    mylist=list(uniqueTypes)
+
+    for item in mylist:
+        uniqueFile.write(item+'\n')
+
+    uniqueFile.close()
+
+def writeUnknownEvents():
+    print('Writing unknown events')
+    eventsFile=open('unknownEvents.txt','w')
+    eventsList=list(unknownEvents)
+
+    for item in eventsList:
+        eventsFile.write(str(item)+'\n')
+
+    eventsFile.close()
+
+def writeUnknownAssets():
+    print('Writing unknown assets')
+    assetsFile=open('unknownAssets.txt','w')
+    assetsList=list(unknownAssets)
+
+    for item in assetsList:
+        assetsFile.write(str(item)+'\n')
+
+    assetsFile.close()
 
 def addEbxGuid(path,ebxRoot):
     if path in parsedEbx:
@@ -249,8 +293,9 @@ class Dbx:
     def readComplex(self, complexIndex,f):
         complexDesc=self.complexDescriptors[complexIndex]
         cmplx=Complex(complexDesc)
-
         startPos=f.tell()
+
+        uniqueTypes.add(complexDesc.name)
         cmplx.fields=[]
         for fieldIndex in range(complexDesc.fieldStartIndex,complexDesc.fieldStartIndex+complexDesc.numField):
             f.seek(startPos+self.fieldDescriptors[fieldIndex].offset)
@@ -403,25 +448,25 @@ class Dbx:
         return field
 
     def dump(self,outName):
-        print(self.trueFilename)
+        #print(self.trueFilename)
         f2=open2(outName,"w")
         f2.write("Partition "+self.fileGUID.format()+"\n")
 
         for (guid,instance) in self.instances:
             if guid==self.primaryInstanceGUID: self.writeInstance(f2,instance,guid.format()+ " #primary instance")
             else: self.writeInstance(f2,instance,guid.format())
-            self.recurse(instance.fields,f2,0)
+            self.recurse(instance.fields,f2,0,instance.desc.name)
 
         f2.close()
 
-    def recurse(self, fields, f2, lvl): #over fields
+    def recurse(self, fields, f2, lvl, typeName=""): #over fields
         lvl+=1
         for field in fields:
             typ=field.desc.getFieldType()
 
             if typ in (FieldType.Void,FieldType.ValueType):
                 self.writeField(f2,field,lvl,"::"+field.value.desc.name)
-                self.recurse(field.value.fields,f2,lvl)
+                self.recurse(field.value.fields,f2,lvl,field.value.desc.name)
 
             elif typ==FieldType.Class:
                 towrite=""
@@ -455,7 +500,7 @@ class Dbx:
                             desc=copy.deepcopy(member.desc)
                             desc.name="member("+str(index)+")"
                             member.desc=desc
-                    self.recurse(field.value.fields,f2,lvl)
+                    self.recurse(field.value.fields,f2,lvl,field.value.desc.name)
 
             elif typ==FieldType.GUID:
                 if field.value.isNull():
@@ -467,10 +512,44 @@ class Dbx:
                 self.writeField(f2,field,lvl," "+field.value.hex().upper())
 
             else:
-                self.writeField(f2,field,lvl," "+str(field.value))
+                writeEventName = False
+                writeAssetName = False
 
-    def writeField(self,f,field,lvl,text):
-        f.write(lvl*"\t"+field.desc.name+text+"\n")
+                if typeName=="PropertyConnection" or typeName=="LinkConnection":
+                    if field.desc.name=="SourceFieldId" or field.desc.name=="TargetFieldId":
+                        writeEventName=True
+                elif typeName=="DynamicLink" or typeName=="DynamicEvent" or typeName=="EventSpec" or typeName=="DataField" or typeName=="InstanceOutputNode":
+                    if field.desc.name=="Id":
+                        writeEventName=True
+                elif typeName=="ActionNode":
+                    if field.desc.name=="ActionKey":
+                        writeEventName=True
+
+                if field.desc.name=="NameHash" or field.desc.name=="AssetId" or field.desc.name=="ProjectId" or field.desc.name=="DataKey" or field.desc.name=="InstanceNameHash":
+                    writeAssetName = True
+
+                self.writeField(f2,field,lvl," " +str(field.value),writeEventName, writeAssetName)
+
+    def writeField(self,f,field,lvl,text,writeEventName=False, writeAssetName=False):
+        f.write(lvl*"\t"+field.desc.name+text)
+
+        if writeEventName:
+            eventKey=str(field.value)
+
+            if eventKey in eventNames:
+                f.write(" ("+eventNames[eventKey]+")")
+            else:
+                unknownEvents.add(field.value)
+
+        if writeAssetName:
+            assetKey=str(field.value)
+
+            if assetKey in assetNames:
+                f.write(" ("+assetNames[assetKey]+")")
+            else:
+                unknownAssets.add(field.value)
+
+        f.write("\n")
 
     def writeInstance(self,f,cmplx,text):
         f.write(cmplx.desc.name+" "+text+"\n")
