@@ -27,8 +27,20 @@ with open('eventHashes.json') as f:
 unknownAssets = set([])
 assetNames = {}
 
+stringTable = set([])
+
 with open('assetHashes.json') as f:
     assetNames = json.load(f)
+
+def writeStringTable():
+    print('Writing string table')
+    stringFile=open('stringTable.txt', 'w', encoding="utf-8")
+    stringlist=list(stringTable)
+
+    for item in stringlist:
+        stringFile.write(item+'\n')
+
+    stringFile.close()
 
 def writeUniqueTypes():
     print('Writing unique types')
@@ -533,21 +545,38 @@ class Dbx:
     def writeField(self,f,field,lvl,text,writeEventName=False, writeAssetName=False):
         f.write(lvl*"\t"+field.desc.name+text)
 
-        if writeEventName:
+        if field.desc.getFieldType()==7:
+            stringTable.add(str(field.value))
+        if field.desc.getFieldType()==FieldType.UInt32 or field.desc.getFieldType()==FieldType.Int32:
             eventKey=str(field.value)
 
             if eventKey in eventNames:
                 f.write(" ("+eventNames[eventKey]+")")
-            else:
-                unknownEvents.add(field.value)
+            elif field.desc.getFieldType()==FieldType.UInt32:
+                eventKey=str(field.value-4294967296)
+                if eventKey in eventNames:
+                    f.write(" ("+eventNames[eventKey]+") #unsigned")
+                else:
+                    assetKey=str(field.value)
 
-        if writeAssetName:
-            assetKey=str(field.value)
-
-            if assetKey in assetNames:
-                f.write(" ("+assetNames[assetKey]+")")
+                    if assetKey in assetNames:
+                        f.write(" ("+assetNames[assetKey]+") #asset")
+                    else:
+                        assetKey=str(field.value-4294967296)
+                        if assetKey in assetNames:
+                            f.write(" ("+assetNames[assetKey]+") #asset unsigned")
+                        else:
+                            if field.value > 2147483647:
+                                unknownEvents.add(field.value-4294967296)
+                            else:
+                                unknownEvents.add(field.value)
             else:
-                unknownAssets.add(field.value)
+                assetKey=str(field.value)
+
+                if assetKey in assetNames:
+                    f.write(" ("+assetNames[assetKey]+")")
+                else:
+                    unknownEvents.add(field.value)
 
         f.write("\n")
 

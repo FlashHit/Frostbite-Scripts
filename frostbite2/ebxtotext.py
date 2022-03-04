@@ -5,7 +5,7 @@ import sys
 
 #Choose where you dumped the files and where to put the resulting TXT files.
 dumpDirectory   = r"D:\hexing\bf3_dump"
-targetDirectory = r"D:\hexing\bf3_ebx_new"
+targetDirectory = r"D:\hexing\bf3_ebx_news"
 inputFolder     = r"" #relative to ebxFolder
 
 ebxFolder       = r"bundles\ebx" #relative to the dumpDirectory
@@ -34,6 +34,7 @@ else:
             outName=os.path.join(targetDirectory,dbx.trueFilename+".txt")
             dbx.dump(outName)
 
+    ebx.writeStringTable()
     ebx.writeUniqueTypes()
     ebx.writeUnknownEvents()
     ebx.writeUnknownAssets()
