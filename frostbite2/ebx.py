@@ -196,7 +196,7 @@ class Stub:
 
 
 class Dbx:
-    def __init__(self,path,ebxRoot):
+    def __init__(self,path,ebxRoot, jsonFormat):
         f=open2(path,"rb")
 
         #metadata
@@ -205,6 +205,7 @@ class Dbx:
         elif magic==b"\x0F\xB2\xD1\xCE": self.bigEndian=True
         else: raise ValueError("The file is not ebx: "+path)
 
+        self.jsonFormat = jsonFormat
         self.unpack=unpackBE if self.bigEndian else unpackLE
         self.ebxRoot=ebxRoot
         self.trueFilename=""
@@ -303,8 +304,9 @@ class Dbx:
                 field.value=data.decode("utf-8","backslashreplace")
                 f.seek(startPos+4)
 
-                if self.isPrimaryInstance and fieldDesc.name=="Name" and self.trueFilename=="":
-                    self.trueFilename=field.value
+                # TODO: add setting
+                #if self.isPrimaryInstance and fieldDesc.name=="Name" and self.trueFilename=="":
+                #    self.trueFilename=field.value
 
         elif typ==FieldType.Enum:
             # Enum
@@ -320,7 +322,7 @@ class Dbx:
 
                 self.enumerations[fieldDesc.ref]=enumeration
 
-            if compareValue not in self.enumerations[fieldDesc.ref].values:
+            if compareValue not in self.enumerations[fieldDesc.ref].values or self.jsonFormat:
                 field.value=str(compareValue)
             else:
                 field.value=self.enumerations[fieldDesc.ref].values[compareValue]
@@ -405,75 +407,184 @@ class Dbx:
     def dump(self,outName):
         print(self.trueFilename)
         f2=open2(outName,"w")
-        f2.write(self.fileGUID.format()+"\n")
+        if self.jsonFormat:
+            f2.write("{\n")
+            f2.write('\t"Name": "' + self.trueFilename+'",\n')
+            f2.write('\t"PartitionGuid": "' + self.fileGUID.format()+'",\n')
+            f2.write('\t"PrimaryInstanceGuid": "' + self.primaryInstanceGUID.format()+'",\n')
+            f2.write('\t"Instances": {\n')
+        else:
+            f2.write(self.fileGUID.format()+"\n")
 
+        count = len(self.instances)
+        currentIndex = 0
         for (guid,instance) in self.instances:
-            if guid==self.primaryInstanceGUID: self.writeInstance(f2,instance,guid.format()+ " #primary instance")
-            else: self.writeInstance(f2,instance,guid.format())
-            self.recurse(instance.fields,f2,0)
+            if self.jsonFormat:
+                currentIndex+=1
+                self.writeInstance(f2,instance,guid.format())
+                self.recurse(instance.fields,f2,3)
+                if count == currentIndex:
+                    f2.write('\t\t}\n')
+                else:
+                    f2.write('\t\t},\n')
+            else:
+                if guid==self.primaryInstanceGUID:
+                    self.writeInstance(f2,instance,guid.format()+ " #primary instance")
+                else: self.writeInstance(f2,instance,guid.format())
+                self.recurse(instance.fields,f2,0)
 
+        if self.jsonFormat:
+            f2.write('\t}\n')
+            f2.write("}\n")
         f2.close()
 
-    def recurse(self, fields, f2, lvl): #over fields
-        lvl+=1
+    def recurse(self, fields, f2, lvl, ignoreComma=True): #over fields
+        count = len(fields)
+        currentIndex = 0
         for field in fields:
+            currentIndex += 1
             typ=field.desc.getFieldType()
 
-            if typ in (FieldType.Void,FieldType.ValueType):
-                self.writeField(f2,field,lvl,"::"+field.value.desc.name)
-                self.recurse(field.value.fields,f2,lvl)
-
-            elif typ==FieldType.Class:
-                towrite=""
-                if field.value>>31:
-                    extguid=self.externalGUIDs[field.value&0x7fffffff]
-                    try: towrite=guidTable[extguid[0]]+"/"+extguid[1].format()
-                    except: towrite=extguid[0].format()+"/"+extguid[1].format()
-                elif field.value==0:
-                    towrite="*nullGuid*"
+            if typ==FieldType.Void:
+                if not self.jsonFormat:
+                    self.writeField(f2,field,lvl,"::"+field.value.desc.name)
+                if count == currentIndex:
+                    self.recurse(field.value.fields,f2,lvl, True)
                 else:
-                    intGuid=self.internalGUIDs[field.value-1]
-                    towrite=intGuid.format()
-                self.writeField(f2,field,lvl," "+towrite)
+                    self.recurse(field.value.fields,f2,lvl, False)
+            elif typ==FieldType.ValueType:
+                if self.jsonFormat:
+                    if field.desc.name == "member":
+                        f2.write(lvl*'\t'+'{\n')
+                    else:
+                        f2.write(lvl*'\t'+'"'+field.desc.name+'": {\n')
+                #else:
+                    #self.writeField(f2,field,lvl,"::"+field.value.desc.name)
+                self.recurse(field.value.fields,f2,lvl+1)
+                if self.jsonFormat:
+                    f2.write(lvl*'\t'+'}')
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
+            elif typ==FieldType.Class:
+                if self.jsonFormat:
+                    if field.value>>31:
+                        extguid=self.externalGUIDs[field.value&0x7fffffff]
+                        if field.desc.name == "member":
+                            f2.write(lvl*'\t'+'{\n')
+                        else:
+                            f2.write(lvl*'\t'+'"'+field.desc.name+'": {\n')
+                        f2.write(lvl*'\t'+'\t"PartitionGuid": "'+extguid[0].format()+'",\n')
+                        f2.write(lvl*'\t'+'\t"InstanceGuid": "'+extguid[1].format()+'"\n')
+                        f2.write(lvl*'\t'+'}')
+                    elif field.value==0:
+                        f2.write(lvl*'\t'+'"'+field.desc.name+'": null')
+                    else:
+                        intGuid=self.internalGUIDs[field.value-1]
+                        if field.desc.name == "member":
+                            f2.write(lvl*'\t'+'{\n')
+                        else:
+                            f2.write(lvl*'\t'+'"'+field.desc.name+'": {\n')
+                        f2.write(lvl*'\t'+'\t"PartitionGuid": "'+self.fileGUID.format()+'",\n')
+                        f2.write(lvl*'\t'+'\t"InstanceGuid": "'+intGuid.format()+'"\n')
+                        f2.write(lvl*'\t'+'}')
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
+                else:
+                    towrite=""
+                    if field.value>>31:
+                        extguid=self.externalGUIDs[field.value&0x7fffffff]
+                        try: towrite=guidTable[extguid[0]]+"/"+extguid[1].format()
+                        except: towrite=extguid[0].format()+"/"+extguid[1].format()
+                    elif field.value==0:
+                        towrite="*nullGuid*"
+                    else:
+                        intGuid=self.internalGUIDs[field.value-1]
+                        towrite=intGuid.format()
+                    self.writeField(f2,field,lvl," "+towrite)
 
             elif typ==FieldType.Array:
                 arrayCmplxDesc=self.complexDescriptors[field.desc.ref]
                 arrayFieldDesc=self.fieldDescriptors[arrayCmplxDesc.fieldStartIndex]
 
-                if len(field.value.fields)==0:
-                    self.writeField(f2,field,lvl," *nullArray*")
-                else:
-                    if arrayFieldDesc.getFieldType()==FieldType.Enum and arrayFieldDesc.ref==0: #hack for enum arrays
-                        self.writeField(f2,field,lvl,"::"+field.value.desc.name+" #unknown enum")
+                if self.jsonFormat:
+                    if len(field.value.fields)==0:
+                        self.writeJsonField(f2,field,lvl,'[]')
                     else:
-                        self.writeField(f2,field,lvl,"::"+field.value.desc.name)
+                        self.writeJsonField(f2,field,lvl,'[\n')
+                        self.recurse(field.value.fields,f2,lvl+1)
+                        f2.write(lvl*'\t'+']')
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
+                else:
+                    if len(field.value.fields)==0:
+                        self.writeField(f2,field,lvl," *nullArray*")
+                    else:
+                        if arrayFieldDesc.getFieldType()==FieldType.Enum and arrayFieldDesc.ref==0: #hack for enum arrays
+                            self.writeField(f2,field,lvl,"::"+field.value.desc.name+" #unknown enum")
+                        else:
+                            self.writeField(f2,field,lvl,"::"+field.value.desc.name)
 
-                    #quick hack so I can add indices to array members while using the same recurse function
-                    for index in range(len(field.value.fields)):
-                        member=field.value.fields[index]
-                        if member.desc.name=="member":
-                            desc=copy.deepcopy(member.desc)
-                            desc.name="member("+str(index)+")"
-                            member.desc=desc
-                    self.recurse(field.value.fields,f2,lvl)
+                        #quick hack so I can add indices to array members while using the same recurse function
+                        for index in range(len(field.value.fields)):
+                            member=field.value.fields[index]
+                            if member.desc.name=="member":
+                                desc=copy.deepcopy(member.desc)
+                                desc.name="member("+str(index)+")"
+                                member.desc=desc
+                        self.recurse(field.value.fields,f2,lvl)
 
             elif typ==FieldType.GUID:
-                if field.value.isNull():
-                    self.writeField(f2,field,lvl," *nullGuid*")
+                if self.jsonFormat:
+                    if field.value.isNull():
+                        self.writeJsonField(f2,field,lvl,'null')
+                    else:
+                        self.writeJsonField(f2,field,lvl,'"'+field.value.format()+'"')
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
                 else:
-                    self.writeField(f2,field,lvl," "+field.value.format())
+                    if field.value.isNull():
+                        self.writeField(f2,field,lvl," *nullGuid*")
+                    else:
+                        self.writeField(f2,field,lvl," "+field.value.format())
 
             elif typ==FieldType.SHA1:
-                self.writeField(f2,field,lvl," "+field.value.hex().upper())
+                if self.jsonFormat:
+                    self.writeJsonField(f2,field,lvl,'"'+field.value.hex().upper()+'"')
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
+                else: self.writeField(f2,field,lvl," "+field.value.hex().upper())
 
             else:
-                self.writeField(f2,field,lvl," "+str(field.value))
+                if self.jsonFormat:
+                    if typ==FieldType.CString or typ==FieldType.String:
+                        f2.write(lvl*'\t'+'"'+field.desc.name+'": "'+str(field.value)+'"')
+                    elif typ==FieldType.Boolean:
+                        if field.value:
+                            self.writeJsonField(f2,field,lvl,"true")
+                        else:
+                            self.writeJsonField(f2,field,lvl,"false")
+                    else:
+                        self.writeJsonField(f2,field,lvl,str(field.value))
+                    if ignoreComma and count == currentIndex: f2.write('\n')
+                    else: f2.write(',\n')
+                else:
+                    self.writeField(f2,field,lvl," "+str(field.value))
 
     def writeField(self,f,field,lvl,text):
         f.write(lvl*"\t"+field.desc.name+text+"\n")
 
+    def writeJsonField(self,f,field,lvl,text):
+        if field.desc.name == "member":
+            f.write(lvl*'\t'+text)
+        else:
+            f.write(lvl*'\t'+'"'+field.desc.name+'": '+text)
+
     def writeInstance(self,f,cmplx,text):
-        f.write(cmplx.desc.name+" "+text+"\n")
+        if self.jsonFormat:
+            f.write('\t\t"'+text+'" : {\n')
+            f.write('\t\t\t"$type": "'+cmplx.desc.name+'",\n')
+        else:
+            f.write(cmplx.desc.name+" "+text+"\n")
 
     def extractAssets(self,chunkFolder,chunkFolder2,resFolder,outputFolder):
         self.chunkFolder=chunkFolder
